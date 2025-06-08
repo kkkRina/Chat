@@ -1,0 +1,273 @@
+Index: Client/src/koshka/Client.kt
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/Client/src/koshka/Client.kt b/Client/src/koshka/Client.kt
+--- a/Client/src/koshka/Client.kt	
++++ b/Client/src/koshka/Client.kt	(date 1746982272787)
+@@ -1,8 +1,7 @@
+ package koshka
+ 
+-import java.io.PrintWriter
+ import java.net.Socket
+-import java.util.Scanner
++import java.util.*
+ import kotlin.concurrent.thread
+ 
+ class Client(
+Index: Client/Client.iml
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/Client/Client.iml b/Client/Client.iml
+--- a/Client/Client.iml	
++++ b/Client/Client.iml	(date 1746980221295)
+@@ -9,5 +9,6 @@
+     <orderEntry type="sourceFolder" forTests="false" />
+     <orderEntry type="library" name="KotlinJavaRuntime" level="project" />
+     <orderEntry type="module" module-name="Communicator" />
++    <orderEntry type="library" name="kotlinx-coroutines-core" level="project" />
+   </component>
+ </module>
+\ No newline at end of file
+Index: Server/src/koshka/Server.kt
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/Server/src/koshka/Server.kt b/Server/src/koshka/Server.kt
+--- a/Server/src/koshka/Server.kt	
++++ b/Server/src/koshka/Server.kt	(date 1746982272787)
+@@ -1,37 +1,34 @@
+ package koshka
+ 
+-import kotlinx.coroutines.CoroutineScope
+-import kotlinx.coroutines.Dispatchers
+-import kotlinx.coroutines.launch
+ import java.io.PrintWriter
+-import java.net.InetSocketAddress
+ import java.net.ServerSocket
+-import java.nio.channels.AsynchronousServerSocketChannel
+ import java.util.Scanner
+ import kotlin.concurrent.thread
++import Communicator
++import kotlinx.coroutines.*
++import java.net.InetSocketAddress
++import java.nio.channels.AsynchronousServerSocketChannel
+ import kotlin.coroutines.suspendCoroutine
+ 
+ class Server(
+-    val port: Int = 5206
++    port: Int = 5206
+ ) {
+ 
+-    private val serverSocket: AsynchronousServerSocketChannel = AsynchronousServerSocketChannel.open()
++    private val serverSocket: AsynchronousServerSocketChannel =
++        AsynchronousServerSocketChannel.open()
+     private val serverScope = CoroutineScope(Dispatchers.IO)
+ 
+     init{
+         serverSocket.bind(InetSocketAddress(port))
+ 
+         serverScope.launch {
+-            val socket = suspendCoroutine {
+-                serverSocket.accept(
+-                    null,
+-                    ActionCompletionHandler(it)
+-                )
+-            }
+-        }
+-        thread {
+-            while(true) {
+-                val socket = serverSocket.accept()
++            while(true) {
++                val socket = suspendCoroutine {
++                    serverSocket.accept(
++                        null,
++                        ActionCompletionHandler(it)
++                    )
++                }
+                 ConnectedClient(socket)
+             }
+             serverSocket.close()
+Index: Server/src/koshka/ConnectedClient.kt
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/Server/src/koshka/ConnectedClient.kt b/Server/src/koshka/ConnectedClient.kt
+--- a/Server/src/koshka/ConnectedClient.kt	
++++ b/Server/src/koshka/ConnectedClient.kt	(date 1746982272787)
+@@ -1,53 +1,27 @@
+ package koshka
+ 
++import Communicator
+ import java.net.Socket
++import java.nio.channels.AsynchronousSocketChannel
+ 
+-class ConnectedClient(val client: Socket) {
++class ConnectedClient(client: AsynchronousSocketChannel) {
+     private val communicator = Communicator(client)
+     private var userName: String? = null
+ 
+     init {
+-        communicator.sendMessage("Введите имя:")
+         communicator.start(::parse)
+         connectedClients.add(this)
+     }
+ 
+-    private fun parse(data: String) {
+-        if (userName == null) {
+-            registerUser(data)
+-        } else {
+-            sendToAll("$userName: $data", echo = false)
+-        }
++    private fun parse(data: String){
++        sendToAll(data, false)
+     }
+ 
+-    private fun registerUser(name: String) {
+-        val trimmedName = name.trim()
+-        if (trimmedName.isNotEmpty()) {
+-            if (connectedClients.any { it.userName?.equals(trimmedName, ignoreCase = true) == true }) {
+-                communicator.sendMessage("Имячко '$trimmedName' уже занято. Введите другое имячко:")
+-            } else {
+-                userName = trimmedName
+-                communicator.sendMessage("Привет, $userName!")
+-                sendToAll("$userName теперь в чятике!", echo = false)
+-            }
+-        } else {
+-            communicator.sendMessage("Ваше имячко пустое? Не верю! Введите другое:")
+-        }
+-    }
+-
+-    fun stop(){
+-        if (userName != null) {
+-            sendToAll("$userName покинул чатик :(", echo = false)
+-        }
+-        communicator.stop()
+-        connectedClients.remove(this)
+-    }
++    fun stop() = communicator.stop()
+ 
+-    private fun sendToAll(data: String, echo: Boolean = true) {
+-        connectedClients.forEach { client ->
+-            if (echo || client != this) {
+-                client.communicator.sendMessage(data)
+-            }
++    private fun sendToAll(data: String, echo: Boolean = true){
++        connectedClients.forEach {
++            if (echo || it != this) it.communicator.sendMessage(data)
+         }
+     }
+ 
+Index: Communicator/src/koshka/Communicator.kt
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/Communicator/src/koshka/Communicator.kt b/Communicator/src/koshka/Communicator.kt
+--- a/Communicator/src/koshka/Communicator.kt	
++++ b/Communicator/src/koshka/Communicator.kt	(date 1746982160078)
+@@ -1,32 +1,51 @@
+-package koshka
+-
++import koshka.ActionCompletionHandler
+ import java.io.PrintWriter
+ import java.net.Socket
++import java.nio.ByteBuffer
++import java.nio.channels.AsynchronousSocketChannel
+ import java.util.*
+ import kotlin.concurrent.thread
++import kotlin.coroutines.suspendCoroutine
+ 
+ class Communicator(
+-    private val socket: Socket,
++    private val socket: AsynchronousSocketChannel,
+ ) {
+ 
+     private var parse: ((String)->Unit)? = null
+     private var isRunning = false
+-    private val scanner = Scanner(socket.getInputStream())
+-    private val writer = PrintWriter(socket.getOutputStream())
++    //private val scanner = Scanner(socket.getInputStream())
++    //private val writer = PrintWriter(socket.getOutputStream())
+ 
+     private fun startMessageAccepting(){
+         thread {
+             while(isRunning){
+-                val data = scanner.nextLine()
+-                parse?.invoke(data)
++                var capacity = Int.SIZE_BYTES
++                repeat(2){
++                    val buf = ByteBuffer.allocate(capacity)
++                    val size = socket.read(buf)
++                    buf.flip()
++                    if (it == 0) capacity = buf.getInt()
++                    else {
++                        val data = Charsets.UTF_8.decode(buf).toString()
++                        parse?.invoke(data)
++                    }
++                }
++
+             }
+             socket.close()
+         }
+     }
+ 
+-    fun sendMessage(message: String){
+-        writer.println(message)
+-        writer.flush()
++    suspend fun sendMessage(message: String){
++        val ba = message.toByteArray()
++        val buf = ByteBuffer.allocate(ba.size + Int.SIZE_BYTES)
++        buf.putInt(ba.size)
++        buf.put(ba)
++        buf.flip()
++
++        val wrote = suspendCoroutine {
++            socket.write(buf, null, ActionCompletionHandler(it))
++        }
+     }
+ 
+     fun start(parser: (String)->Unit) {
+Index: Communicator/src/koshka/ActionCompletionHandler.kt
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/Communicator/src/koshka/ActionCompletionHandler.kt b/Communicator/src/koshka/ActionCompletionHandler.kt
+--- a/Communicator/src/koshka/ActionCompletionHandler.kt	
++++ b/Communicator/src/koshka/ActionCompletionHandler.kt	(date 1746424019204)
+@@ -5,9 +5,10 @@
+ import kotlin.coroutines.resume
+ import kotlin.coroutines.resumeWithException
+ 
+-
+-class ActionCompletionHandler<R>(private val c: Continuation<R>) : CompletionHandler<R, Any?> {
+-    override fun completed(result: R, attachment: Any?){
++class ActionCompletionHandler<R>(private val c: Continuation<R>)
++    : CompletionHandler<R, Any?>
++{
++    override fun completed(result: R, attachment: Any?) {
+         c.resume(result)
+     }
+ 
+Index: Communicator/Communicator.iml
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/Communicator/Communicator.iml b/Communicator/Communicator.iml
+--- a/Communicator/Communicator.iml	
++++ b/Communicator/Communicator.iml	(date 1746980297863)
+@@ -8,5 +8,6 @@
+     <orderEntry type="inheritedJdk" />
+     <orderEntry type="sourceFolder" forTests="false" />
+     <orderEntry type="library" name="KotlinJavaRuntime" level="project" />
++    <orderEntry type="library" name="kotlinx-coroutines-core" level="project" />
+   </component>
+ </module>
+\ No newline at end of file
